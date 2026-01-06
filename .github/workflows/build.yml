@@ -18,20 +18,17 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    # 1. Instalacja mbelib (z Patchem)
     - name: Build & Install mbelib
       run: |
         git clone https://github.com/szechyjs/mbelib.git
         cd mbelib
         perl -pi -e 's/cmake_minimum_required\(VERSION .*\)/cmake_minimum_required\(VERSION 3.10\)/g' CMakeLists.txt
         find . -name "CMakeLists.txt" -exec perl -pi -e 's/cmake_minimum_required\(VERSION .*\)/cmake_minimum_required\(VERSION 3.10\)/g' {} +
-        
         mkdir build && cd build
         cmake -DCMAKE_INSTALL_PREFIX=/usr/local -Wno-dev ..
         make
         sudo make install
 
-    # 2. Instalacja dsdcc
     - name: Build & Install dsdcc
       run: |
         git clone https://github.com/f4exb/dsdcc.git
@@ -42,21 +39,17 @@ jobs:
         make
         sudo make install
 
-    # 3. Miniaudio
     - name: Download miniaudio.h
       run: |
         if [ ! -f src/miniaudio.h ]; then
           curl -o src/miniaudio.h https://raw.githubusercontent.com/mackron/miniaudio/master/miniaudio.h
         fi
 
-    # 4. Kompilacja Aplikacji
     - name: Compile OpenDSD_GUI
       run: |
         cmake -B build -DCMAKE_BUILD_TYPE=Release
         cmake --build build --config Release
 
-    # 5. PAKOWANIE (Tworzenie .app Bundle)
-    # 5. PAKOWANIE (Tworzenie .app Bundle + Uprawnienia Audio)
     - name: Create macOS Bundle
       run: |
         APP_NAME="OpenDSD"
@@ -64,26 +57,19 @@ jobs:
         MACOS_DIR="$APP_DIR/Contents/MacOS"
         FW_DIR="$APP_DIR/Contents/Frameworks"
         RES_DIR="$APP_DIR/Contents/Resources"
-
         mkdir -p "$MACOS_DIR" "$FW_DIR" "$RES_DIR"
 
-        # Kopiowanie binarki
         cp build/OpenDSD_GUI "$MACOS_DIR/$APP_NAME"
         chmod +x "$MACOS_DIR/$APP_NAME"
-
-        # Kopiowanie bibliotek
         cp /usr/local/lib/libdsdcc*.dylib "$FW_DIR/"
         cp /usr/local/lib/libmbe*.dylib "$FW_DIR/"
         
-        # Relinking
         LIB_DSDCC=$(basename $(ls "$FW_DIR"/libdsdcc*.dylib | head -n 1))
         LIB_MBE=$(basename $(ls "$FW_DIR"/libmbe*.dylib | head -n 1))
 
         install_name_tool -change "/usr/local/lib/$LIB_DSDCC" "@executable_path/../Frameworks/$LIB_DSDCC" "$MACOS_DIR/$APP_NAME"
         install_name_tool -change "/usr/local/lib/$LIB_MBE" "@executable_path/../Frameworks/$LIB_MBE" "$MACOS_DIR/$APP_NAME"
 
-        # --- INFO.PLIST Z UPRAWNIENIAMI DO MIKROFONU ---
-        # Dodajemy klucz NSMicrophoneUsageDescription
         cat > "$APP_DIR/Contents/Info.plist" <<EOF
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -107,17 +93,12 @@ jobs:
         </plist>
         EOF
     
-    # --- NOWOŚĆ: AD-HOC SIGNING ---
-    # To naprawia błąd "App is damaged" na Apple Silicon po modyfikacji install_name_tool
     - name: Ad-hoc Codesign
-      run: |
-        codesign --force --deep --sign - "OpenDSD.app"
+      run: codesign --force --deep --sign - "OpenDSD.app"
 
-    # 6. KOMPRESJA
     - name: Compress App
       run: tar -czf OpenDSD_macOS.tar.gz OpenDSD.app
 
-    # 7. Upload
     - name: Upload macOS App
       uses: actions/upload-artifact@v4
       with:
@@ -134,7 +115,6 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    # 1. Zależności systemowe
     - name: Install System Deps
       run: |
         sudo sed -i 's/#$nrconf{restart} = '"'"'i'"'"';/$nrconf{restart} = '"'"'a'"'"';/g' /etc/needrestart/needrestart.conf || true
@@ -142,7 +122,6 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y build-essential cmake libasound2-dev libgl1-mesa-dev xorg-dev libxi-dev libxcursor-dev libxrandr-dev
 
-    # 2. mbelib
     - name: Build & Install mbelib
       run: |
         git clone https://github.com/szechyjs/mbelib.git
@@ -152,7 +131,6 @@ jobs:
         make
         sudo make install
 
-    # 3. dsdcc
     - name: Build & Install dsdcc
       run: |
         git clone https://github.com/f4exb/dsdcc.git
@@ -163,45 +141,114 @@ jobs:
         make
         sudo make install
 
-    # 4. Miniaudio
     - name: Download miniaudio.h
       run: |
         if [ ! -f src/miniaudio.h ]; then
           curl -o src/miniaudio.h https://raw.githubusercontent.com/mackron/miniaudio/master/miniaudio.h
         fi
 
-    # 5. Kompilacja
     - name: Compile OpenDSD_GUI
       run: |
         cmake -B build -DCMAKE_BUILD_TYPE=Release
         cmake --build build --config Release
 
-    # 6. PAKOWANIE (Tworzenie portable folder)
     - name: Create Linux Portable
       run: |
         mkdir -p dist/libs
-        
-        # Kopiuj executable
         cp build/OpenDSD_GUI dist/OpenDSD_GUI
         chmod +x dist/OpenDSD_GUI
-        
-        # Kopiuj biblioteki .so
         cp /usr/local/lib/libdsdcc.so* dist/libs/
         cp /usr/local/lib/libmbe.so* dist/libs/
         
-        # Stwórz skrypt uruchamiający
         cat > dist/run.sh <<EOF
         #!/bin/bash
         cd "\$(dirname "\$0")"
         export LD_LIBRARY_PATH="\$PWD/libs:\$LD_LIBRARY_PATH"
         ./OpenDSD_GUI
         EOF
-        
         chmod +x dist/run.sh
 
-    # 7. Upload
     - name: Upload Linux Portable
       uses: actions/upload-artifact@v4
       with:
         name: OpenDSD_Linux
+        path: dist/
+  # ===========================================================================
+  # BUILD WINDOWS (MSYS2 / MinGW64)
+  # ===========================================================================
+  build-windows:
+    name: Windows (MinGW64)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        update: true
+        install: >-
+          git
+          make
+          mingw-w64-x86_64-cmake
+          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-ninja
+          mingw-w64-x86_64-libtool
+          
+    - name: Build mbelib
+      run: |
+        git clone https://github.com/szechyjs/mbelib.git
+        cd mbelib
+        
+        # Patch CMake dla starszej wersji w mbelib
+        perl -pi -e 's/cmake_minimum_required\(VERSION .*\)/cmake_minimum_required\(VERSION 3.10\)/g' CMakeLists.txt
+        find . -name "CMakeLists.txt" -exec perl -pi -e 's/cmake_minimum_required\(VERSION .*\)/cmake_minimum_required\(VERSION 3.10\)/g' {} +
+        
+        mkdir build && cd build
+        cmake -G "Ninja" -DCMAKE_INSTALL_PREFIX=/mingw64 ..
+        ninja
+        ninja install
+
+    - name: Build dsdcc
+      run: |
+        git clone https://github.com/f4exb/dsdcc.git
+        cd dsdcc
+        git checkout f27b32d2df131ae3a376fe72d3fb880ae1f9ede1
+        mkdir build && cd build
+        cmake -G "Ninja" -DCMAKE_INSTALL_PREFIX=/mingw64 -DUSE_MBELIB=ON ..
+        ninja
+        ninja install
+
+    - name: Download miniaudio.h
+      run: |
+        if [ ! -f src/miniaudio.h ]; then
+          curl -o src/miniaudio.h https://raw.githubusercontent.com/mackron/miniaudio/master/miniaudio.h
+        fi
+
+    - name: Compile OpenDSD_GUI
+      run: |
+        mkdir build && cd build
+        cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release ..
+        ninja
+
+    - name: Create Windows Bundle
+      run: |
+        mkdir dist
+        cp build/OpenDSD_GUI.exe dist/
+        
+        # UWAGA: Biblioteki dsdcc i mbe skompilowały się statycznie (.a) i są już w środku .exe.
+        # Dlatego usuwamy polecenia kopiowania libdsdcc.dll i libmbe.dll, które powodowały błąd.
+        
+        # Kopiowanie bibliotek systemowych MinGW (Te są KONIECZNE, by exe odpalił na czystym Windows)
+        cp /mingw64/bin/libgcc_s_seh-1.dll dist/
+        cp /mingw64/bin/libstdc++-6.dll dist/
+        cp /mingw64/bin/libwinpthread-1.dll dist/
+        
+    - name: Upload Windows Portable
+      uses: actions/upload-artifact@v4
+      with:
+        name: OpenDSD_Windows
         path: dist/

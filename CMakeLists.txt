@@ -4,9 +4,18 @@ project(OpenDSD_GUI VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Lokalizacje instalacji użytkownika (macOS /usr/local)
-include_directories(/usr/local/include)
-link_directories(/usr/local/lib)
+# Lokalizacje instalacji użytkownika
+if(UNIX AND NOT APPLE)
+    include_directories(/usr/local/include)
+    link_directories(/usr/local/lib)
+elseif(WIN32)
+    # W MSYS2 biblioteki lądują w /mingw64
+    include_directories(/mingw64/include)
+    link_directories(/mingw64/lib)
+else()
+    include_directories(/usr/local/include)
+    link_directories(/usr/local/lib)
+endif()
 
 # --- Zależności: GLFW & ImGui (FetchContent) ---
 include(FetchContent)
@@ -46,12 +55,11 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${imgui_SOURCE_DIR}
     ${imgui_SOURCE_DIR}/backends
     src
-    /usr/local/include
 )
 
 # --- Linkowanie ---
 if(APPLE)
-    # macOS (Twoja konfiguracja)
+    # macOS
     target_link_libraries(${PROJECT_NAME} PRIVATE
         glfw
         "-framework OpenGL"
@@ -62,8 +70,19 @@ if(APPLE)
         dsdcc
         mbe
     )
+elseif(WIN32)
+    # Windows (MinGW)
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+        glfw
+        opengl32
+        dsdcc
+        mbe
+        ws2_32  # Wymagane dla dsdcc na Windows
+        winmm   # Wymagane dla miniaudio
+    )
+    # USUNIĘTO: add_custom_command (kopiowanie DLL robimy w workflow)
 elseif(UNIX AND NOT APPLE)
-    # Linux (Dla GitHub Actions)
+    # Linux
     find_package(Threads REQUIRED)
     target_link_libraries(${PROJECT_NAME} PRIVATE
         glfw
@@ -71,5 +90,6 @@ elseif(UNIX AND NOT APPLE)
         dsdcc
         mbe
         Threads::Threads
+        dl
     )
 endif()
