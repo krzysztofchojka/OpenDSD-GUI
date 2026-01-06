@@ -174,7 +174,7 @@ jobs:
         name: OpenDSD_Linux
         path: dist/
   # ===========================================================================
-  # BUILD WINDOWS (MSYS2 / MinGW64)
+  # BUILD WINDOWS (MSYS2 / MinGW64) - FINAL FIX
   # ===========================================================================
   build-windows:
     name: Windows (MinGW64)
@@ -202,14 +202,13 @@ jobs:
       run: |
         git clone https://github.com/szechyjs/mbelib.git
         cd mbelib
-        
-        # Patch CMake dla starszej wersji w mbelib
         perl -pi -e 's/cmake_minimum_required\(VERSION .*\)/cmake_minimum_required\(VERSION 3.10\)/g' CMakeLists.txt
-        find . -name "CMakeLists.txt" -exec perl -pi -e 's/cmake_minimum_required\(VERSION .*\)/cmake_minimum_required\(VERSION 3.10\)/g' {} +
-        
+        perl -pi -e 's/add_subdirectory\(test\)//g' CMakeLists.txt
         mkdir build && cd build
-        cmake -G "Ninja" -DCMAKE_INSTALL_PREFIX=/mingw64 ..
+        cmake -G "Ninja" -DCMAKE_INSTALL_PREFIX=/mingw64 -DBUILD_SHARED_LIBS=ON -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=TRUE ..
         ninja
+        # Ręcznie instalujemy DLL do folderu systemowego, bo ninja install tego nie robi
+        cp libmbe.dll /mingw64/bin/
         ninja install
 
     - name: Build dsdcc
@@ -218,15 +217,11 @@ jobs:
         cd dsdcc
         git checkout f27b32d2df131ae3a376fe72d3fb880ae1f9ede1
         mkdir build && cd build
-        cmake -G "Ninja" -DCMAKE_INSTALL_PREFIX=/mingw64 -DUSE_MBELIB=ON ..
+        cmake -G "Ninja" -DCMAKE_INSTALL_PREFIX=/mingw64 -DUSE_MBELIB=ON -DBUILD_SHARED_LIBS=ON -DBUILD_TESTING=OFF -DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=TRUE ..
         ninja
+        # Ręcznie instalujemy DLL (dsdcc też może mieć ten problem)
+        cp libdsdcc.dll /mingw64/bin/ || cp libdsdcc.dll /mingw64/lib/ || echo "DLL not in build root"
         ninja install
-
-    - name: Download miniaudio.h
-      run: |
-        if [ ! -f src/miniaudio.h ]; then
-          curl -o src/miniaudio.h https://raw.githubusercontent.com/mackron/miniaudio/master/miniaudio.h
-        fi
 
     - name: Compile OpenDSD_GUI
       run: |
@@ -239,14 +234,15 @@ jobs:
         mkdir dist
         cp build/OpenDSD_GUI.exe dist/
         
-        # UWAGA: Biblioteki dsdcc i mbe skompilowały się statycznie (.a) i są już w środku .exe.
-        # Dlatego usuwamy polecenia kopiowania libdsdcc.dll i libmbe.dll, które powodowały błąd.
+        # Kopiowanie DLL z przygotowanych wcześniej lokalizacji
+        cp /mingw64/bin/libmbe.dll dist/
+        cp /mingw64/bin/libdsdcc.dll dist/
         
-        # Kopiowanie bibliotek systemowych MinGW (Te są KONIECZNE, by exe odpalił na czystym Windows)
+        # Biblioteki systemowe MinGW
         cp /mingw64/bin/libgcc_s_seh-1.dll dist/
         cp /mingw64/bin/libstdc++-6.dll dist/
         cp /mingw64/bin/libwinpthread-1.dll dist/
-        
+
     - name: Upload Windows Portable
       uses: actions/upload-artifact@v4
       with:
